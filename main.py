@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import json
 import sys
 from io import StringIO
@@ -25,7 +26,7 @@ class spcht_checker(QDialog):
         self.setBaseSize(1280, 720)
         self.setMinimumSize(720, 480)
         self.setWindowTitle("SPCHT Format Checker & analyzer")
-        self.setWindowFlag(QtCore.Qt.Window)
+        self.setWindowFlags(QtCore.Qt.WindowMinimizeButtonHint & QtCore.Qt.WindowMaximizeButtonHint)
 
         main_layout = QGridLayout(self)
 
@@ -45,6 +46,10 @@ class spcht_checker(QDialog):
         self.str_json_file = QLineEdit()
         self.str_json_file.setPlaceholderText("Click the open button after loading a spcht.json file to try out testdata")
         self.str_json_file.setReadOnly(True)
+        self.str_graph = QLineEdit()
+        self.str_graph.setPlaceholderText("Graph name")
+        self.str_graph.setReadOnly(True)
+        self.str_graph.setMaximumWidth(250)
         self.btn_json_file = QPushButton("Testdata")
         self.btn_json_file.setToolTip("A spcht testdata file is formated in json with a list as root and each element containing the dictionary of one entry.")
         self.btn_json_file.setDisabled(True)
@@ -52,6 +57,7 @@ class spcht_checker(QDialog):
         self.btn_json_retry.setToolTip("This DOES NOT retry to load the Testdata but \ninstead reloads the Spcht File and THEN reloads\n the testdata as part of its routine")
         self.btn_json_retry.setDisabled(True)
         line3.addWidget(self.str_json_file)
+        line3.addWidget(self.str_graph)
         line3.addWidget(self.btn_json_file)
         line3.addWidget(self.btn_json_retry)
 
@@ -98,6 +104,7 @@ class spcht_checker(QDialog):
         self.txt_tabview.setFont(QFont("Monospace", 10))
         self.tbl_tabview = QTableView()
         self.tbl_tabview.horizontalHeader().setStretchLastSection(True)
+        self.tbl_tabview.horizontalHeader().setSectionsClickable(False)
         self.mdl_tbl_sparql = QStandardItemModel()
         self.mdl_tbl_sparql.setHorizontalHeaderLabels(["resource identifier", "property name", "property value"])
         self.tbl_tabview.setModel(self.mdl_tbl_sparql)
@@ -105,7 +112,6 @@ class spcht_checker(QDialog):
         self.tbl_tabview.setColumnWidth(1, 300)
 
         tabView = QTabWidget()
-        tabView.setTabPosition(QTabWidget.West)
         tabView.setTabShape(QTabWidget.Triangular)
         tabView.addTab(self.txt_tabview, "Text")
         tabView.addTab(self.tbl_tabview, "Table")
@@ -142,6 +148,9 @@ class spcht_checker(QDialog):
         self.btn_tristate.clicked.connect(self.toogleTriState)
         self.btn_json_file.clicked.connect(self.btn_clk_loadtestdata)
         self.toogleTriState(0)
+
+        # various
+        self.console.insertPlainText(spcht_checker.time_log(f"Init done, program started"))
 
     def btn_spcht_load_dialogue(self):
         path_To_File, type = QtWidgets.QFileDialog.getOpenFileName(self, "Open spcht descriptor file", "./", "Spcht Json File (*.spcht.json);;Json File (*.json);;Every file (*.*)")
@@ -230,10 +239,33 @@ class spcht_checker(QDialog):
             self.tristate = self.centralLayout.currentIndex()
         self.btn_tristate.setText(toggleTexts[self.tristate])
 
-    def btn_clk_loadtestdata(self, file):
+    def btn_clk_loadtestdata(self):
+        path_To_File, type = QtWidgets.QFileDialog.getOpenFileName(self, "Open sample data", "./",
+                                                                   "Json File (*.json);;Every file (*.*)")
+
+        if path_To_File == "":
+            return None
+
+        graphtext = self.str_graph.displayText()
+        graph, status = QtWidgets.QInputDialog.getText(self, "Insert Graph name",
+                                                    "Insert the name of the graph that is supposed to be mapped onto",
+                                                    text=graphtext)
+        if status is False or graph.strip() == "":
+            return None
+        if self.btn_act_loadtestdata(path_To_File, graph):
+            self.btn_json_retry.setDisabled(False)
+            self.str_json_file.setText(path_To_File)
+            self.str_graph.setText(graph)
+
+    def btn_clk_loadtestdata_retry(self):
+        self.load_spcht(self.str_sdf_file.displayText())
+        self.btn_act_loadtestdata(self.str_json_file.displayText(), self.str_graph.displayText())
+        # its probably bad style to directly use interface element text
+
+    def btn_act_loadtestdata(self, filename, graph):
         debug_dict = {}  # TODO: loading of definitions
         try:
-            with open("thetestset.descri.json") as file:
+            with open("thetestset.descri.json") as file: # complex file operation here
                 temp_dict = json.load(file)
                 if isinstance(temp_dict, dict):
                     code_green = 1
@@ -250,23 +282,26 @@ class spcht_checker(QDialog):
             print("Json Debug error")
             pass # also okay
         # loading debug data from debug dict if possible
-        with open("thetestset.json", "r") as file:
-            thetestset = json.load(file)
-            tbl_list = []
-            text_list = []
-            for entry in thetestset:
-                temp = self.taube.processData(entry, "https://data.finc.info/resources/")  # TODO: input for graph
-                if isinstance(temp, list):
-                    text_list.append(
-                    "\n\n=== {} - {} ===\n".format(entry.get('id', "Unknown ID"), debug_dict.get(entry.get('id'), "Ohne Name")))
-                    for each in temp:
-                        if each[3] == 0:
-                            tbl_list.append((each[0], each[1], each[2]))
-                            tmp_sparql = f"<{each[0]}> <{each[1]}> \"{each[2]}\" . \n"
-                        else:  # "<{}> <{}> <{}> .\n".format(graph + ressource, node['graph'], facet))
-                            tmp_sparql = f"<{each[0]}> <{each[1]}> <{each[2]}> . \n"
-                            tbl_list.append((each[0], each[1], f"<{each[2]}>"))
-                        text_list.append(tmp_sparql)
+        try:
+            with open(filename, "r") as file:
+                thetestset = json.load(file)
+                tbl_list = []
+                text_list = []
+                for entry in thetestset:
+                    temp = self.taube.processData(entry, graph)  # TODO: input for graph
+                    if isinstance(temp, list):
+                        text_list.append(
+                        "\n\n=== {} - {} ===\n".format(entry.get('id', "Unknown ID"), debug_dict.get(entry.get('id'), "Ohne Name")))
+                        for each in temp:
+                            if each[3] == 0:
+                                tbl_list.append((each[0], each[1], each[2]))
+                                tmp_sparql = f"<{each[0]}> <{each[1]}> \"{each[2]}\" . \n"
+                            else:  # "<{}> <{}> <{}> .\n".format(graph + ressource, node['graph'], facet))
+                                tmp_sparql = f"<{each[0]}> <{each[1]}> <{each[2]}> . \n"
+                                tbl_list.append((each[0], each[1], f"<{each[2]}>"))
+                            text_list.append(tmp_sparql)
+        except FileNotFoundError:
+            return False
         # txt view
         self.txt_tabview.clear()
         for each in text_list:
@@ -278,8 +313,10 @@ class spcht_checker(QDialog):
             col0 = QStandardItem(each[0])
             col1 = QStandardItem(each[1])
             col2 = QStandardItem(each[2])
+            spcht_checker.disableEdits(col0, col1, col2)
             self.mdl_tbl_sparql.appendRow([col0, col1, col2])
         self.toogleTriState(2)
+        return True
 
 
     @staticmethod
