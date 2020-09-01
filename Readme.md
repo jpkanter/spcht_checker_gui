@@ -1,8 +1,16 @@
 # Graphical User Interface for the SDF
 
-Bla text
+A graphical interface to look at the content of a **spcht descriptor file**. Further it provides some basic functionality to test and verify the workings of a created sdf.
+
+**Allows no editing at the moment**
+
+The Interface is build with QT5/PySide2 and runs under Windows/Linux/Mac. I provide simple executables for Windows and Linux. Those are *compiled* with PyInstaller and might have some performance loss, startup for the single files might also be slowed down due the packed nature of the executables.
 
 ![main_menu](./README/main_menu.png)
+
+Also works under windows.
+
+![spchtgui_windows](./README/spchtgui_windows.png)
 
 ## Installation
 
@@ -22,4 +30,5 @@ Bla text
 (GUI)
 
 * PySide2 >= 5.12
+* python-dateutils (technically only for one stupid display thing)
 
