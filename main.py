@@ -1,22 +1,73 @@
 #!/usr/bin/env python
 import json
+import re
 import sys
+import time
 from io import StringIO
 from datetime import datetime
 
 from PySide2.QtGui import QStandardItemModel, QStandardItem, QFont
 from PySide2.QtWidgets import *
 from PySide2 import QtWidgets, QtCore
+from dateutil.relativedelta import relativedelta
 from SpchtDescriptorFormat import Spcht
 
 # Windows Stuff for Building under Windows
 try:
-    # Include in try/except block if you're also targeting Mac/Linux
     from PySide2.QtWinExtras import QtWin
     myappid = 'UBL.SPCHT.checkerGui.0.2'
     QtWin.setCurrentProcessExplicitAppUserModelID(myappid)
 except ImportError:
     pass
+
+
+def delta_time_human(**kwargs):
+    # https://stackoverflow.com/a/11157649
+    attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds', 'microseconds']
+    delta = relativedelta(**kwargs)
+    human_string = ""
+    for attr in attrs:
+        if getattr(delta, attr):
+            if human_string != "":
+                human_string += ", "
+            human_string += '%d %s' % (getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1])
+    return human_string
+
+
+def disableEdits(*args1: QStandardItem):
+    # why is this even necessary, why why why
+    for each in args1:
+        each.setEditable(False)
+
+
+def time_log(line: str, time_string="%Y.%m.%d-%H:%M:%S", spacer="\n", end="\n"):
+    return f"{datetime.now().strftime(time_string)}{spacer}{line}{end}"
+
+
+def handle_variants(dictlist: dict or list) -> list:
+    """
+    When loading json test data there multiple formatstructures possible, for now its either direct export from solr
+    or an already curated list, to make it easier here this function exists
+    :param dictlist: the loaded json files content, most likely a list but could also be a dict
+    :return: a list of dictionaries
+    :rtype: list
+    """
+    # ? structure list of dictionary list > dict > key:value
+    if isinstance(dictlist, list):
+        go_purple = True
+        for each in dictlist:
+            if not isinstance(each, dict):
+                go_purple = False
+                break
+        # ! condition for go_purple here
+        return dictlist
+    if isinstance(dictlist, dict):
+        # lucky guess 1 : solr export data
+        if Spcht.is_dictkey(dictlist, 'response'):
+            if Spcht.is_dictkey(dictlist['response'], 'docs'):
+                return dictlist['response']['docs']
+    return dictlist  # this will most likely throw an exception, we kinda want that
+
 
 class spcht_checker(QDialog):
 
@@ -54,7 +105,7 @@ class spcht_checker(QDialog):
         self.btn_json_file.setToolTip("A spcht testdata file is formated in json with a list as root and each element containing the dictionary of one entry.")
         self.btn_json_file.setDisabled(True)
         self.btn_json_retry = QPushButton("retry")
-        self.btn_json_retry.setToolTip("This DOES NOT retry to load the Testdata but \ninstead reloads the Spcht File and THEN reloads\n the testdata as part of its routine")
+        self.btn_json_retry.setToolTip("This does not only retry to load the Testdata but \ninstead reloads the Spcht File and THEN reloads\n the testdata as part of its routine")
         self.btn_json_retry.setDisabled(True)
         line3.addWidget(self.str_json_file)
         line3.addWidget(self.str_graph)
@@ -63,13 +114,26 @@ class spcht_checker(QDialog):
 
         # middle part - View 1
         middleLayout = QHBoxLayout()
-        self.line2 = QTreeView()
+
+        tree_and_buttons = QGridLayout()
+        tree_and_buttons.setMargin(0)
+        self.btn_tree_expand = QPushButton("Expand all")
+        self.btn_tree_expand.setFlat(True)
+        self.btn_tree_expand.setFixedHeight(15)
+        self.btn_tree_collapse = QPushButton("Collapse all")
+        self.btn_tree_collapse.setFlat(True)
+        self.btn_tree_collapse.setFixedHeight(15)
+        self.tre_spcht_data = QTreeView()
         self.treeViewModel = QStandardItemModel()
         self.treeViewModel.setHorizontalHeaderLabels(
-            ['Name/#', 'source', 'graph', 'fields', 'subfields', 'info', 'comments'])
-        self.line2.setModel(self.treeViewModel)
-        self.line2.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.line2.setUniformRowHeights(True)
+            ['Name/#', 'graph', 'source', 'fields', 'subfields', 'info', 'comments'])
+        self.tre_spcht_data.setModel(self.treeViewModel)
+        self.tre_spcht_data.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tre_spcht_data.setUniformRowHeights(True)
+        tree_and_buttons.addWidget(self.btn_tree_expand, 0, 0)
+        tree_and_buttons.addWidget(self.btn_tree_collapse, 0, 1)
+        tree_and_buttons.setColumnStretch(2, 1)
+        tree_and_buttons.addWidget(self.tre_spcht_data, 1, 0, 1, 3)
 
         label_fields = QLabel("Fields")
         self.lst_fields = QListView()
@@ -89,7 +153,7 @@ class spcht_checker(QDialog):
         graphs.addWidget(label_graphs)
         graphs.addWidget(self.lst_graphs)
 
-        middleLayout.addWidget(self.line2)
+        middleLayout.addLayout(tree_and_buttons)
         middleLayout.addLayout(fields)
         middleLayout.addLayout(graphs)
 
@@ -118,16 +182,24 @@ class spcht_checker(QDialog):
 
 
         # bottom
+        self.bottomStack = QStackedWidget()
+        self.bottomStack.setContentsMargins(0, 0, 0, 0)
+        self.bottomStack.setMaximumHeight(20)
         self.btn_tristate = QPushButton()
         self.btn_tristate.setMaximumWidth(60)
         self.btn_tristate.setFlat(True)
         self.tristate = 0
         self.notifybar = QStatusBar()
-        self.notifybar.showMessage("Dies ist ein Test"*20)
         self.notifybar.setSizeGripEnabled(False)
+        self.processBar = QProgressBar()
         bottombar = QHBoxLayout()
+        bottombar.setContentsMargins(0, 0, 0, 0)
         bottombar.addWidget(self.btn_tristate)
         bottombar.addWidget(self.notifybar)
+        randombarasWidget = QWidget()
+        randombarasWidget.setLayout(bottombar)
+        self.bottomStack.addWidget(randombarasWidget)
+        self.bottomStack.addWidget(self.processBar)
 
         # general layouting
         self.centralLayout = QStackedWidget()
@@ -140,17 +212,21 @@ class spcht_checker(QDialog):
         main_layout.addLayout(line1, 0, 0)
         main_layout.addWidget(self.centralLayout, 1, 0)
         main_layout.addLayout(line3, 2, 0)
-        main_layout.addLayout(bottombar, 3, 0)
+        #main_layout.addLayout(bottombar, 3, 0)
+        main_layout.addWidget(self.bottomStack, 3, 0)
 
         # Event Binds
         self.btn_sdf_file.clicked.connect(self.btn_spcht_load_dialogue)
         self.btn_sdf_retry.clicked.connect(self.btn_spcht_load_retry)
         self.btn_tristate.clicked.connect(self.toogleTriState)
         self.btn_json_file.clicked.connect(self.btn_clk_loadtestdata)
+        self.btn_json_retry.clicked.connect(self.btn_clk_loadtestdata_retry)
+        self.btn_tree_expand.clicked.connect(self.tre_spcht_data.expandAll)
+        self.btn_tree_collapse.clicked.connect(self.tre_spcht_data.collapseAll)
         self.toogleTriState(0)
 
         # various
-        self.console.insertPlainText(spcht_checker.time_log(f"Init done, program started"))
+        self.console.insertPlainText(time_log(f"Init done, program started"))
 
     def btn_spcht_load_dialogue(self):
         path_To_File, type = QtWidgets.QFileDialog.getOpenFileName(self, "Open spcht descriptor file", "./", "Spcht Json File (*.spcht.json);;Json File (*.json);;Every file (*.*)")
@@ -172,22 +248,26 @@ class spcht_checker(QDialog):
                 output = StringIO()
                 status = Spcht.check_format(testdict, out=output)
         except json.decoder.JSONDecodeError as e:
-            self.console.insertPlainText(spcht_checker.time_log(f"JSON Error: {str(e)}"))
+            self.console.insertPlainText(time_log(f"JSON Error: {str(e)}"))
+            self.write_status("Json error while loading Spcht")
             self.toogleTriState(0)
             return None
         except FileNotFoundError as e:
-            self.console.insertPlainText(spcht_checker.time_log(f"File not Found: {str(e)}"))
+            self.console.insertPlainText(time_log(f"File not Found: {str(e)}"))
+            self.write_status("Spcht file could not be found")
             self.toogleTriState(0)
             return None
 
         self.taube.load_descriptor_file(path_To_File)
         if status:
-            self.centralLayout.setCurrentIndex(1)
+            self.toogleTriState(1)
             self.btn_json_file.setDisabled(False)
             self.populate_treeview_with_spcht()
             self.populate_text_views()
+            self.write_status("Loaded spcht discriptor file")
         else:
-            self.console.insertPlainText(spcht_checker.time_log(f"SPCHT Error: {output.getvalue()}"))
+            self.console.insertPlainText(time_log(f"SPCHT Error: {output.getvalue()}"))
+            self.write_status("Loading of spcht failed")
             self.toogleTriState(0)
 
     def populate_treeview_with_spcht(self):
@@ -198,18 +278,63 @@ class spcht_checker(QDialog):
         for each in self.taube:
             i += 1
             tree_row = QStandardItem(each.get('name', f"Element #{i}"))
-            col0 = QStandardItem("") # dummy
-            col1 = QStandardItem(each.get('source'))
-            col2 = QStandardItem(each.get('graph', ""))
-            col3 = QStandardItem(each.get('field', ""))
-            col4 = QStandardItem(each.get('subfield', ""))
-            col5 = QStandardItem("No Info yet")
-            col6 = QStandardItem(each.get('comment'))
-            spcht_checker.disableEdits(col0, col1, col2, col3, col4, col5, col6)
-            tree_row.appendRow([col0, col1, col2, col3, col4, col5, col6])
+            spcht_checker.populate_treeview_recursion(tree_row, each)
             tree_row.setEditable(False)
             self.treeViewModel.appendRow(tree_row)
-            self.line2.setFirstColumnSpanned(i-1, self.line2.rootIndex(), True)
+            self.tre_spcht_data.setFirstColumnSpanned(i - 1, self.tre_spcht_data.rootIndex(), True)
+
+    @staticmethod
+    def populate_treeview_recursion(parent, node):
+        info = ""
+        if node.get('type') == "mandatory":
+            col0 = QStandardItem("!!!")
+            col0.setToolTip("This field is mandatory")
+        else:
+            col0 = QStandardItem("")
+        col1 = QStandardItem(node.get('graph', ""))
+        col1.setToolTip(node.get('graph', ""))
+        col2 = QStandardItem(node.get('source'))
+        fields = node.get('field', "") + " |"
+        if Spcht.is_dictkey(node, 'alternatives'):
+            fields += " Alts: "
+            for each in node['alternatives']:
+                fields += f"{each}, "
+        col3 = QStandardItem(fields[:-2])
+        col3.setToolTip(fields[:-2])
+        # subfield interpretings
+        subfield = ""
+        if Spcht.is_dictkey(node, 'subfields'):
+            for each in node['subfields']:
+                subfield += f"{each}, "
+            subfield = subfield[:-2]
+            info += f"concat: {node.get('concat', ' ')}; "
+        else:
+            subfield = node.get('subfield', "")  # if subfield doesnt exist this is empty
+        col4 = QStandardItem(subfield)
+        # other fields
+        additionals = ["append", "prepend", "cut", "replace", "match", "graph_field"]
+        for each in additionals:
+            if Spcht.is_dictkey(node, each):
+                info += f"{node[each]}; "
+        col5 = QStandardItem(info[:-2])
+        col5.setToolTip(info[:2])
+        # comments
+        commentlist = []
+        for each in node.keys():
+            finding = re.match(r"(?i)^(comment).*$", each)
+            if finding is not None:
+                commentlist.append(finding.string)
+        commentText = ""
+        commentBubble = ""
+        for each in commentlist:
+            commentText += node[each] + ", "
+            commentBubble += node[each] + "\n"
+        col6 = QStandardItem(commentText[:-2])
+        col6.setToolTip(commentBubble[:-1])
+        disableEdits(col0, col1, col2, col3, col4, col5, col6)
+        parent.appendRow([col0, col1, col2, col3, col4, col5, col6])
+        if Spcht.is_dictkey(node, 'fallback'):
+            spcht_checker.populate_treeview_recursion(parent, node['fallback'])
 
     def populate_text_views(self):
         # retrieve used fields & graphs
@@ -271,37 +396,55 @@ class spcht_checker(QDialog):
                     code_green = 1
                     for key, value in temp_dict.items():
                         if not isinstance(key, str) or not isinstance(value, str):
+                            self.write_status("Auxilliary data isnt in expected format")
                             code_green = 0
                             break
                     if code_green == 1:
                         debug_dict = temp_dict
         except FileNotFoundError:
-            print("No accompanied descriptor found")
-            pass # nothing happens
+            self.write_status("No auxilliary data has been found")
+            pass  # nothing happens
         except json.JSONDecodeError:
-            print("Json Debug error")
-            pass # also okay
+            self.write_status("Loading of auxilliary testdata failed due a json error")
+            pass  # also okay
         # loading debug data from debug dict if possible
+        time_process_start = datetime.now()
         try:
             with open(filename, "r") as file:
                 thetestset = json.load(file)
-                tbl_list = []
-                text_list = []
-                for entry in thetestset:
-                    temp = self.taube.processData(entry, graph)  # TODO: input for graph
-                    if isinstance(temp, list):
-                        text_list.append(
-                        "\n\n=== {} - {} ===\n".format(entry.get('id', "Unknown ID"), debug_dict.get(entry.get('id'), "Ohne Name")))
-                        for each in temp:
-                            if each[3] == 0:
-                                tbl_list.append((each[0], each[1], each[2]))
-                                tmp_sparql = f"<{each[0]}> <{each[1]}> \"{each[2]}\" . \n"
-                            else:  # "<{}> <{}> <{}> .\n".format(graph + ressource, node['graph'], facet))
-                                tmp_sparql = f"<{each[0]}> <{each[1]}> <{each[2]}> . \n"
-                                tbl_list.append((each[0], each[1], f"<{each[2]}>"))
-                            text_list.append(tmp_sparql)
         except FileNotFoundError:
+            self.write_status("Loading of example Data file failed.")
             return False
+        except json.JSONDecodeError as e:
+            self.write_status(f"Example data contains json errors: {e}")
+            self.console.insertPlainText(time_log(f"JSON Error in Example File: {str(e)}"))
+            return False
+        tbl_list = []
+        text_list = []
+        thetestset = handle_variants(thetestset)
+        self.progressMode(True)
+        self.processBar.setMaximum(len(thetestset))
+        i = 0
+        for entry in thetestset:
+            i += 1
+            self.processBar.setValue(i)
+            try:
+                temp = self.taube.processData(entry, graph)  # TODO: input for graph
+            except Exception as e:  # probably an AttributeError but i actually cant know, so we cast the WIDE net
+                self.progressMode(False)
+                self.write_status(f"SPCHT interpreting encountered an exception {e}")
+                return False
+            if isinstance(temp, list):
+                text_list.append(
+                "\n=== {} - {} ===\n".format(entry.get('id', "Unknown ID"), debug_dict.get(entry.get('id'), "Ohne Name")))
+                for each in temp:
+                    if each[3] == 0:
+                        tbl_list.append((each[0], each[1], each[2]))
+                        tmp_sparql = f"<{each[0]}> <{each[1]}> \"{each[2]}\" . \n"
+                    else:  # "<{}> <{}> <{}> .\n".format(graph + ressource, node['graph'], facet))
+                        tmp_sparql = f"<{each[0]}> <{each[1]}> <{each[2]}> . \n"
+                        tbl_list.append((each[0], each[1], f"<{each[2]}>"))
+                    text_list.append(tmp_sparql)
         # txt view
         self.txt_tabview.clear()
         for each in text_list:
@@ -313,24 +456,36 @@ class spcht_checker(QDialog):
             col0 = QStandardItem(each[0])
             col1 = QStandardItem(each[1])
             col2 = QStandardItem(each[2])
-            spcht_checker.disableEdits(col0, col1, col2)
+            disableEdits(col0, col1, col2)
             self.mdl_tbl_sparql.appendRow([col0, col1, col2])
         self.toogleTriState(2)
+        time3 = datetime.now()-time_process_start
+        self.write_status(f"Testdata processing finished, took {delta_time_human(microseconds=time3.microseconds)}")
+        self.progressMode(False)
         return True
 
+    def write_status(self, text):
+        self.notifybar.showMessage(time_log(text, time_string="%H:%M:%S", spacer=" ", end=""))
 
-    @staticmethod
-    def disableEdits(*args1 : QStandardItem):
-        # why is this even necessary, why why why
-        for each in args1:
-            each.setEditable(False)
+    def progressMode(self, mode):
+        # ! might go hay wire if used elsewhere cause it resets the buttons in a sense, unproblematic when
+        # ! only used in processData cause all buttons are active there
+        if mode:
+            self.btn_json_retry.setDisabled(True)
+            self.btn_json_file.setDisabled(True)
+            self.btn_sdf_retry.setDisabled(True)
+            self.btn_sdf_file.setDisabled(True)
+            self.bottomStack.setCurrentIndex(1)
+        else:
+            self.btn_json_retry.setDisabled(False)
+            self.btn_json_file.setDisabled(False)
+            self.btn_sdf_retry.setDisabled(False)
+            self.btn_sdf_file.setDisabled(False)
+            self.bottomStack.setCurrentIndex(0)
 
-    @staticmethod
-    def time_log(line : str, time_string="%Y.%m.%d-%H:%M:%S", spacer="\n", end="\n"):
-        return f"{datetime.now().strftime(time_string)}{spacer}{line}{end}"
 
-
-thisApp = QtWidgets.QApplication(sys.argv)
-window = spcht_checker()
-window.show()
-sys.exit(thisApp.exec_())
+if __name__ == "__main__":
+    thisApp = QtWidgets.QApplication(sys.argv)
+    window = spcht_checker()
+    window.show()
+    sys.exit(thisApp.exec_())

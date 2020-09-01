@@ -2,7 +2,7 @@
 
 Bla text
 
-
+![main_menu](./README/main_menu.png)
 
 ## Installation
 
