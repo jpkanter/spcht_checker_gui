@@ -8,7 +8,7 @@ from io import StringIO
 from datetime import datetime
 from pathlib import Path
 
-from PySide2.QtGui import QStandardItemModel, QStandardItem, QFont, QFontDatabase
+from PySide2.QtGui import QStandardItemModel, QStandardItem, QFont, QFontDatabase, QIcon
 from PySide2.QtWidgets import *
 from PySide2 import QtWidgets, QtCore
 from dateutil.relativedelta import relativedelta
@@ -22,6 +22,7 @@ try:
 except ImportError:
     pass
 
+import resources
 
 def delta_time_human(**kwargs):
     # https://stackoverflow.com/a/11157649
@@ -494,6 +495,7 @@ class spcht_checker(QDialog):
 
 if __name__ == "__main__":
     thisApp = QtWidgets.QApplication(sys.argv)
+    thisApp.setWindowIcon(QIcon(':/icons/woodpecker.ico'))
     window = spcht_checker()
     window.show()
     sys.exit(thisApp.exec_())
