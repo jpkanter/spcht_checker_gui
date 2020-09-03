@@ -8,7 +8,7 @@ from io import StringIO
 from datetime import datetime
 from pathlib import Path
 
-from PySide2.QtGui import QStandardItemModel, QStandardItem, QFont
+from PySide2.QtGui import QStandardItemModel, QStandardItem, QFont, QFontDatabase
 from PySide2.QtWidgets import *
 from PySide2 import QtWidgets, QtCore
 from dateutil.relativedelta import relativedelta
@@ -75,6 +75,8 @@ class spcht_checker(QDialog):
 
     def __init__(self):
         super(spcht_checker, self).__init__()
+        FIXEDFONT = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        FIXEDFONT.setPointSize(10)
         self.taube = Spcht()
         self.setBaseSize(1280, 720)
         self.setMinimumSize(720, 480)
@@ -162,12 +164,12 @@ class spcht_checker(QDialog):
         # middle part - View 2
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setFont(QFont("Monospace", 10))
+        self.console.setFont(FIXEDFONT)
 
         # middle part - View 3
         self.txt_tabview = QTextEdit()
         self.txt_tabview.setReadOnly(True)
-        self.txt_tabview.setFont(QFont("Monospace", 10))
+        self.txt_tabview.setFont(FIXEDFONT)
         self.tbl_tabview = QTableView()
         self.tbl_tabview.horizontalHeader().setStretchLastSection(True)
         self.tbl_tabview.horizontalHeader().setSectionsClickable(False)
