@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 import json
+import os
 import re
 import sys
 import time
 from io import StringIO
 from datetime import datetime
+from pathlib import Path
 
 from PySide2.QtGui import QStandardItemModel, QStandardItem, QFont
 from PySide2.QtWidgets import *
@@ -389,8 +391,12 @@ class spcht_checker(QDialog):
 
     def btn_act_loadtestdata(self, filename, graph):
         debug_dict = {}  # TODO: loading of definitions
+        basePath = Path(filename)
+        descriPath = os.path.join(f"{basePath.parent}", f"{basePath.stem}.descri{basePath.suffix}")
+        print(descriPath)
+        # the ministry for bad python hacks presents you this path thingy, pathlib has probably something better i didnt find in 10 seconds of googling
         try:
-            with open("thetestset.descri.json") as file: # complex file operation here
+            with open(descriPath) as file:  # complex file operation here
                 temp_dict = json.load(file)
                 if isinstance(temp_dict, dict):
                     code_green = 1
