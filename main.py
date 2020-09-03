@@ -22,6 +22,7 @@ try:
 except ImportError:
     pass
 
+# ? compiled resource file -> pyside2-rcc resources.qrc -o resources.py
 import resources
 
 def delta_time_human(**kwargs):
@@ -263,8 +264,12 @@ class spcht_checker(QDialog):
             self.toogleTriState(0)
             return None
 
-        self.taube.load_descriptor_file(path_To_File)
         if status:
+            if not self.taube.load_descriptor_file(path_To_File):
+                self.console.insertPlainText(time_log(
+                    f"Unknown error while loading SPCHT, this is most likely something the checker engine doesnt account for, it might be 'new'"))
+                self.write_status("Unexpected kind of error while loading Spcht")
+                return False
             self.toogleTriState(1)
             self.btn_json_file.setDisabled(False)
             self.populate_treeview_with_spcht()
